@@ -1,0 +1,254 @@
+<!--
+  ════════════════════════════════════════════════════════════════
+  DISCUSSION BRANCH + LEAF UI  —  drop this into your discussions
+  detail page wherever you render a single discussion.
+
+  Requires: a global `API` base-url string and `getToken()` helper
+  already present in your app, e.g.:
+      const API = '/api';
+      function getToken() { return localStorage.getItem('token'); }
+
+  Replace the <!-- PASTE INTO YOUR PAGE --> sections as directed.
+  ════════════════════════════════════════════════════════════════
+-->
+
+<!-- ① STYLES — add once inside <style> or your CSS file -->
+<style>
+/* ── Branch tree ─────────────────────────────────────────── */
+.branch-section        { margin-top: 2rem; }
+.branch-section h3     { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
+
+.branch-form           { display: flex; gap: .5rem; margin-bottom: 1.5rem; }
+.branch-form textarea  { flex: 1; padding: .6rem .8rem; border: 1px solid #d1c9be;
+                          border-radius: 6px; resize: vertical; min-height: 68px;
+                          font-family: inherit; font-size: .9rem; }
+.branch-form button    { align-self: flex-end; padding: .55rem 1.1rem;
+                          background: #d4782e; color: #fff; border: none;
+                          border-radius: 6px; cursor: pointer; font-size: .9rem;
+                          white-space: nowrap; }
+.branch-form button:hover { background: #b8621f; }
+
+.branch-tree           { display: flex; flex-direction: column; gap: .75rem; }
+
+.branch-card           { background: #faf8f5; border: 1px solid #e8e2d9;
+                          border-left: 3px solid #d4782e; border-radius: 6px;
+                          padding: .85rem 1rem; }
+.branch-card.depth-1   { margin-left: 1.5rem; border-left-color: #8b7355; }
+.branch-card.depth-2   { margin-left: 3rem;   border-left-color: #a0998f; }
+.branch-card.depth-3   { margin-left: 4.5rem; border-left-color: #bdb5ac; }
+
+.branch-meta           { font-size: .78rem; color: #888; margin-bottom: .4rem; }
+.branch-meta strong    { color: #555; }
+.branch-text           { font-size: .92rem; color: #333; line-height: 1.55;
+                          margin-bottom: .6rem; white-space: pre-wrap; }
+
+.branch-actions        { display: flex; align-items: center; gap: .75rem;
+                          flex-wrap: wrap; }
+.btn-leaf              { display: inline-flex; align-items: center; gap: .3rem;
+                          font-size: .8rem; padding: .3rem .75rem;
+                          border: 1px solid #d4782e; border-radius: 20px;
+                          background: transparent; color: #d4782e;
+                          cursor: pointer; transition: all .15s; }
+.btn-leaf.active,
+.btn-leaf:hover        { background: #d4782e; color: #fff; }
+.btn-leaf .leaf-count  { font-weight: 600; }
+
+.btn-reply             { font-size: .8rem; color: #888; background: none;
+                          border: none; cursor: pointer; padding: .3rem 0; }
+.btn-reply:hover       { color: #d4782e; }
+
+.reply-form            { margin-top: .75rem; display: flex; gap: .5rem; }
+.reply-form textarea   { flex: 1; padding: .5rem .7rem; border: 1px solid #d1c9be;
+                          border-radius: 6px; resize: vertical; min-height: 56px;
+                          font-family: inherit; font-size: .85rem; }
+.reply-form button     { align-self: flex-end; padding: .45rem .9rem;
+                          background: #8b7355; color: #fff; border: none;
+                          border-radius: 6px; cursor: pointer; font-size: .85rem; }
+.reply-form button:hover { background: #6e5c43; }
+
+.no-branches           { color: #999; font-size: .9rem; font-style: italic; }
+</style>
+
+
+<!-- ② HTML TEMPLATE — paste inside your discussion detail container -->
+<section class="branch-section" id="branch-section">
+  <h3>Branches</h3>
+
+  <!-- Add top-level branch -->
+  <div class="branch-form" id="root-branch-form">
+    <textarea id="root-branch-text" placeholder="Add a branch to this discussion…" rows="2"></textarea>
+    <button onclick="submitBranch(null)">Add Branch</button>
+  </div>
+
+  <!-- Branch tree renders here -->
+  <div class="branch-tree" id="branch-tree">
+    <p class="no-branches">No branches yet. Start one above.</p>
+  </div>
+</section>
+
+
+<!-- ③ JAVASCRIPT — paste before </body> or in your script section -->
+<script>
+// ── State ──────────────────────────────────────────────────────
+// Replace DISCUSSION_ID with however you get the current discussion id,
+// e.g. from the URL:  const DISCUSSION_ID = location.pathname.split('/').pop();
+const DISCUSSION_ID = (() => {
+  const parts = location.pathname.split('/').filter(Boolean);
+  return parts[parts.length - 1];
+})();
+
+let _branches = [];   // flat cache updated after each action
+
+// ── Helpers ────────────────────────────────────────────────────
+function authHeaders() {
+  const t = getToken();
+  return t ? { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t }
+           : { 'Content-Type': 'application/json' };
+}
+function isLoggedIn() { return !!getToken(); }
+
+// ── Load & render ──────────────────────────────────────────────
+async function loadBranches() {
+  try {
+    const res  = await fetch(`${API}/discussions/${DISCUSSION_ID}`, { headers: authHeaders() });
+    const disc = await res.json();
+    _branches  = disc.branches || [];
+    renderBranchTree(_branches, document.getElementById('branch-tree'));
+  } catch(e) {
+    console.error('Could not load branches', e);
+  }
+}
+
+function renderBranchTree(branches, container) {
+  container.innerHTML = '';
+  if (!branches.length) {
+    container.innerHTML = '<p class="no-branches">No branches yet. Start one above.</p>';
+    return;
+  }
+  branches.forEach(b => container.appendChild(buildBranchEl(b)));
+}
+
+function buildBranchEl(branch) {
+  const depth  = Math.min(branch.depth || 0, 3);
+  const myEmail = getCurrentUserEmail();  // implement per your auth system
+  const hasLeafed = myEmail && branch.leaves && branch.leaves.includes(myEmail);
+
+  const card = document.createElement('div');
+  card.className = `branch-card depth-${depth}`;
+  card.id = `branch-${branch.id}`;
+
+  const time = branch.created_at
+    ? new Date(branch.created_at * 1000).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })
+    : '';
+
+  card.innerHTML = `
+    <div class="branch-meta"><strong>${escHtml(branch.author)}</strong> · ${time}</div>
+    <div class="branch-text">${escHtml(branch.text)}</div>
+    <div class="branch-actions">
+      <button class="btn-leaf ${hasLeafed ? 'active' : ''}"
+              onclick="toggleLeaf(${branch.id}, this)"
+              title="${hasLeafed ? 'Remove leaf' : 'Add leaf'}">
+        🍃 <span class="leaf-count">${(branch.leaves || []).length}</span>
+      </button>
+      ${isLoggedIn() ? `<button class="btn-reply" onclick="toggleReplyForm(${branch.id})">↩ Reply</button>` : ''}
+    </div>
+    <div class="reply-form" id="reply-form-${branch.id}" style="display:none">
+      <textarea id="reply-text-${branch.id}" placeholder="Reply to this branch…" rows="2"></textarea>
+      <button onclick="submitBranch(${branch.id})">Reply</button>
+    </div>
+  `;
+
+  // Recursively render children
+  if (branch.children && branch.children.length) {
+    const childWrap = document.createElement('div');
+    childWrap.style.marginTop = '.5rem';
+    branch.children.forEach(child => childWrap.appendChild(buildBranchEl(child)));
+    card.appendChild(childWrap);
+  }
+
+  return card;
+}
+
+// ── Toggle reply form ──────────────────────────────────────────
+function toggleReplyForm(branchId) {
+  const form = document.getElementById(`reply-form-${branchId}`);
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+  if (form.style.display === 'flex') {
+    form.querySelector('textarea').focus();
+  }
+}
+
+// ── Submit branch (root or reply) ──────────────────────────────
+async function submitBranch(parentBranchId) {
+  if (!isLoggedIn()) { alert('Please log in to add a branch.'); return; }
+
+  const textareaId = parentBranchId ? `reply-text-${parentBranchId}` : 'root-branch-text';
+  const textarea   = document.getElementById(textareaId);
+  const text       = textarea.value.trim();
+  if (!text) { textarea.focus(); return; }
+
+  try {
+    const res = await fetch(`${API}/discussions/${DISCUSSION_ID}/branches`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ text, parentBranchId: parentBranchId || undefined })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Could not add branch.'); return; }
+
+    textarea.value = '';
+    if (parentBranchId) {
+      const form = document.getElementById(`reply-form-${parentBranchId}`);
+      if (form) form.style.display = 'none';
+    }
+    await loadBranches();   // re-fetch full tree so counts + nesting are correct
+  } catch(e) {
+    alert('Network error. Please try again.');
+  }
+}
+
+// ── Toggle leaf (like) ─────────────────────────────────────────
+async function toggleLeaf(branchId, btn) {
+  if (!isLoggedIn()) { alert('Please log in to add a leaf.'); return; }
+
+  try {
+    const res  = await fetch(`${API}/discussions/${DISCUSSION_ID}/branches/${branchId}/leaf`, {
+      method: 'POST',
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Could not toggle leaf.'); return; }
+
+    // Update UI immediately without full re-render
+    const countEl = btn.querySelector('.leaf-count');
+    countEl.textContent = data.leaves.length;
+    btn.classList.toggle('active', data.liked);
+    btn.title = data.liked ? 'Remove leaf' : 'Add leaf';
+  } catch(e) {
+    alert('Network error. Please try again.');
+  }
+}
+
+// ── Utils ──────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Returns the logged-in user's email — adapt to match your auth state.
+// If you store the decoded JWT in a global `currentUser`:
+//   function getCurrentUserEmail() { return currentUser?.email || null; }
+function getCurrentUserEmail() {
+  try {
+    const token = getToken();
+    if (!token) return null;
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return (payload.email || '').toLowerCase();
+  } catch { return null; }
+}
+
+// ── Init ───────────────────────────────────────────────────────
+loadBranches();
+</script>
