@@ -1,0 +1,21 @@
+{
+  "name": "themargin",
+  "version": "1.0.0",
+  "description": "The Margin — blog & discussion platform",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "express": "^4.22.1",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^6.10.1",
+    "sql.js": "^1.14.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
